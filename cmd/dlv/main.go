@@ -24,6 +24,8 @@ import (
 
 const version string = "0.10.0-alpha"
 
+var Build string
+
 var (
 	Log        bool
 	Headless   bool
@@ -66,7 +68,7 @@ The goal of this tool is to provide a simple yet powerful interface for debuggin
 		Use:   "version",
 		Short: "Prints version.",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("Delve version: " + version)
+			fmt.Printf("Delve Debugger\nVersion: %s\nBuild: %s\n", version, Build)
 		},
 	}
 	rootCommand.AddCommand(versionCommand)
@@ -191,6 +193,9 @@ starts and attaches to it, and enables you to immediately begin debugging your p
 				for {
 					select {
 					case state := <-stateChan:
+						if state == nil {
+							return 0
+						}
 						if state.Err != nil {
 							fmt.Fprintln(os.Stderr, state.Err)
 							return 0
@@ -205,7 +210,8 @@ starts and attaches to it, and enables you to immediately begin debugging your p
 								args = append(args, arg.SinglelineString())
 							}
 						}
-						fmt.Printf("%s(%s) %s:%d\n", fname, strings.Join(args, ", "), state.CurrentThread.File, state.CurrentThread.Line)
+						fp := terminal.ShortenFilePath(state.CurrentThread.File)
+						fmt.Printf("%s(%s) %s:%d\n", fname, strings.Join(args, ", "), fp, state.CurrentThread.Line)
 					case <-sigChan:
 						server.Stop(traceAttachPid == 0)
 						return 1

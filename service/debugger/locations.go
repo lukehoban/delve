@@ -40,6 +40,7 @@ type LineLocationSpec struct {
 
 type FuncLocationSpec struct {
 	PackageName           string
+	AbsolutePackage       bool
 	ReceiverName          string
 	PackageOrReceiverName string
 	BaseName              string
@@ -99,7 +100,7 @@ func parseLocationSpecDefault(locStr, rest string) (LocationSpec, error) {
 		return fmt.Errorf("Malformed breakpoint location \"%s\" at %d: %s", locStr, len(locStr)-len(rest), reason)
 	}
 
-	v := strings.Split(rest, ":")
+	v := strings.SplitN(rest, ":", 2)
 	if len(v) > 2 {
 		// On Windows, path may contain ":", so split only on last ":"
 		v = []string { strings.Join(v[0:len(v)-1], ":"), v[len(v)-1] }
@@ -181,10 +182,15 @@ func parseFuncLocationSpec(in string) *FuncLocationSpec {
 	case 3:
 		spec.BaseName = v[2]
 		spec.ReceiverName = stripReceiverDecoration(v[1])
-		spec.PackageName = stripReceiverDecoration(v[0])
+		spec.PackageName = v[0]
 
 	default:
 		return nil
+	}
+
+	if strings.HasPrefix(spec.PackageName, "/") {
+		spec.PackageName = spec.PackageName[1:]
+		spec.AbsolutePackage = true
 	}
 
 	if strings.Index(spec.BaseName, "/") >= 0 || strings.Index(spec.ReceiverName, "/") >= 0 {
@@ -214,10 +220,18 @@ func (spec *FuncLocationSpec) Match(sym *gosym.Sym) bool {
 	if spec.ReceiverName != "" && spec.ReceiverName != recv {
 		return false
 	}
-	if spec.PackageName != "" && spec.PackageName != sym.PackageName() {
-		return false
+	if spec.PackageName != "" {
+		if spec.AbsolutePackage {
+			if spec.PackageName != sym.PackageName() {
+				return false
+			}
+		} else {
+			if !partialPathMatch(spec.PackageName, sym.PackageName()) {
+				return false
+			}
+		}
 	}
-	if spec.PackageOrReceiverName != "" && spec.PackageOrReceiverName != sym.PackageName() && spec.PackageOrReceiverName != recv {
+	if spec.PackageOrReceiverName != "" && !partialPathMatch(spec.PackageOrReceiverName, sym.PackageName()) && spec.PackageOrReceiverName != recv {
 		return false
 	}
 	return true
@@ -244,11 +258,14 @@ func (loc *AddrLocationSpec) Find(d *Debugger, pc uint64, locStr string) ([]api.
 }
 
 func (loc *NormalLocationSpec) FileMatch(path string) bool {
-	if len(loc.Base) < len(path)-1 {
-		// Even in PE files on Windows, the symbol table path is encoded with '/'
-		return strings.HasSuffix(path, loc.Base) && (path[len(path)-len(loc.Base)-1] == '/')
+	return partialPathMatch(loc.Base, path)
+}
+
+func partialPathMatch(expr, path string) bool {
+	if len(expr) < len(path)-1 {
+		return strings.HasSuffix(path, expr) && (path[len(path)-len(expr)-1] == filepath.Separator)
 	} else {
-		return loc.Base == path
+		return expr == path
 	}
 }
 
@@ -303,7 +320,7 @@ func (loc *NormalLocationSpec) Find(d *Debugger, pc uint64, locStr string) ([]ap
 	case 1:
 		var addr uint64
 		var err error
-		if filepath.IsAbs(candidates[0]) {
+		if candidates[0][0] == '/' {
 			if loc.LineOffset < 0 {
 				return nil, fmt.Errorf("Malformed breakpoint location, no line offset specified")
 			}
