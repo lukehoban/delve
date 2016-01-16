@@ -256,6 +256,11 @@ starts and attaches to it, and enable you to immediately begin debugging your pr
 					return 1
 				}
 				debugname := "./" + base + ".test"
+                
+                if runtime.GOOS == "windows" {
+                    debugname += ".exe"
+                }
+                
 				defer os.Remove(debugname)
 				processArgs := append([]string{debugname}, args...)
 
